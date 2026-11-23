@@ -1,0 +1,178 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  ADMIN
+  AGENT
+  VIEWER
+}
+
+enum TripStatus {
+  NOT_SPECIFIED
+  UPCOMING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum RefundStatus {
+  NOT_APPLICABLE
+  UNKNOWN
+  PENDING
+  PARTIAL_REFUNDED
+  FULL_REFUNDED
+}
+
+enum ServiceType {
+  FLIGHTS
+  STAYS
+  ACTIVITIES
+  TRANSFERS
+  FERRY
+  VISA
+  TOURIST_TAX
+  ARRIVAL_CARD
+  TRAVEL_INSURANCE
+}
+
+enum BookingStatus {
+  UNKNOWN
+  TO_BE_DONE
+  IN_PROGRESS
+  COMPLETED
+  NOT_NEEDED
+  CANCELLED
+}
+
+enum Handler {
+  UNASSIGNED
+  TRAVORA
+  SELF
+  MIXED
+}
+
+enum SupportStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+model User {
+  id                    String                 @id @default(cuid())
+  name                  String
+  email                 String                 @unique
+  passwordHash          String
+  role                  UserRole
+  isActive              Boolean                @default(true)
+  customerId            String?                @unique
+  customer              Customer?              @relation("CustomerPortalAccount", fields: [customerId], references: [id], onDelete: SetNull)
+  assignedServiceTypes  ServiceTypeAssignment[] @relation("AssignedServiceAgent")
+  createdServiceTypes   ServiceTypeAssignment[] @relation("ServiceAssignmentCreator")
+  supportRequests       SupportRequest[]       @relation("SupportRequester")
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+
+  @@index([role, isActive])
+}
+
+model Customer {
+  id             String        @id @default(cuid())
+  name           String
+  email          String?
+  phone          String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  trips          Trip[]
+  portalAccount  User?         @relation("CustomerPortalAccount")
+  supportRequests SupportRequest[]
+
+  @@index([name])
+}
+
+model Trip {
+  id                 String        @id @default(cuid())
+  customerId         String
+  customer           Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  destination        String
+  startDate          DateTime      @db.Date
+  tripStatus         TripStatus    @default(NOT_SPECIFIED)
+  sourceStatusText   String?
+  operationalNotes   String?       @db.Text
+  refundStatus       RefundStatus  @default(NOT_APPLICABLE)
+  refundPercentage   Int?
+  refundAmount       Decimal?      @db.Decimal(12, 2)
+  refundNotes        String?       @db.Text
+  services           ServiceBooking[]
+  supportRequests    SupportRequest[]
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@index([startDate])
+  @@index([tripStatus])
+  @@index([destination])
+}
+
+model ServiceBooking {
+  id               String        @id @default(cuid())
+  tripId           String
+  trip             Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  serviceType      ServiceType
+  itemName         String?
+  bookingStatus    BookingStatus @default(UNKNOWN)
+  handledBy        Handler       @default(UNASSIGNED)
+  progressNote     String?
+  notes            String?       @db.Text
+  sourceStatusText String?
+  updatedAt        DateTime      @updatedAt
+  supportRequests  SupportRequest[]
+
+  @@index([tripId, serviceType])
+  @@index([serviceType, bookingStatus])
+  @@index([handledBy])
+}
+
+// One admin assignment per service category. Every matching booking across every trip
+// belongs to the selected agent (e.g. all FLIGHTS records).
+model ServiceTypeAssignment {
+  id           String      @id @default(cuid())
+  serviceType  ServiceType @unique
+  agentId      String
+  agent        User        @relation("AssignedServiceAgent", fields: [agentId], references: [id], onDelete: Restrict)
+  assignedById String
+  assignedBy   User        @relation("ServiceAssignmentCreator", fields: [assignedById], references: [id], onDelete: Restrict)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([agentId])
+  @@index([assignedById])
+}
+
+model SupportRequest {
+  id                String        @id @default(cuid())
+  customerId        String
+  customer          Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  requesterUserId  String
+  requester         User          @relation("SupportRequester", fields: [requesterUserId], references: [id], onDelete: Cascade)
+  tripId            String?
+  trip              Trip?         @relation(fields: [tripId], references: [id], onDelete: SetNull)
+  serviceBookingId  String?
+  serviceBooking    ServiceBooking? @relation(fields: [serviceBookingId], references: [id], onDelete: SetNull)
+  subject           String
+  message           String        @db.Text
+  status            SupportStatus @default(OPEN)
+  adminReply        String?       @db.Text
+  respondedAt       DateTime?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([customerId, createdAt])
+  @@index([requesterUserId, createdAt])
+  @@index([status, createdAt])
+}
